@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ディズニー記憶力ゲーム</title>
+    
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f4f9;
+            margin: 20px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        #game-board {
+            display: grid;
+            /* 4x4のグリッドレイアウト */
+            grid-template-columns: repeat(4, 100px);
+            grid-template-rows: repeat(4, 100px);
+            gap: 10px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .card {
+            width: 100px;
+            height: 100px;
+            background-color: #6a6a6a; /* 裏面のデフォルト色 */
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 30px;
+            color: white;
+            transition: transform 0.3s, background-color 0.3s;
+            transform-style: preserve-3d;
+            position: relative;
+        }
+
+        /* カードの表（絵文字）と裏（?）のスタイル */
+        .card-inner {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            text-align: center;
+            line-height: 100px;
+            /* 3Dフリップアニメーションの核心 */
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+
+        .card-face, .card-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden; /* 裏側を見せない */
+            border-radius: 8px;
+        }
+        
+        /* 裏面 */
+        .card-back {
+            background-color: #3f51b5; /* 裏面の色 (ミッキーブルー風) */
+            color: white;
+            font-size: 40px;
+            line-height: 100px;
+        }
+
+        /* 表（絵文字） */
+        .card-face {
+            background-color: #ffffff; /* 表面の色 */
+            color: #3f51b5; /* 絵文字の色（絵文字自体の色は変わらないことが多いですが、フォールバックとして） */
+            transform: rotateY(180deg); /* 初期状態で裏返す */
+            border: 3px solid #3f51b5;
+            font-weight: bold;
+            font-size: 50px; /* 絵文字なので大きめに */
+            line-height: 100px;
+        }
+
+        /* めくられた状態 */
+        .flipped .card-inner {
+            transform: rotateY(180deg);
+        }
+
+        /* マッチした状態 */
+        .matched {
+            background-color: #4caf50; /* マッチ時の背景色 */
+            cursor: default;
+            pointer-events: none; /* クリック無効化 */
+        }
+        
+        .matched .card-face {
+            color: #4caf50;
+            border: 3px solid #4caf50;
+        }
+
+        /* ゲームオーバー時のメッセージ */
+        #message {
+            margin-top: 20px;
+            font-size: 24px;
+            color: #e91e63;
+            font-weight: bold;
+        }
+
+        /* リスタートボタン */
+        button {
+            padding: 10px 20px;
+            font-size: 18px;
+            margin-top: 20px;
+            cursor: pointer;
+            background-color: #e91e63; /* ディズニーレッド風 */
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #c2185b;
+        }
+    </style>
+</head>
+<body>
+    <h1>ディズニー記憶力ゲーム</h1>
+    <div id="game-board">
+        </div>
+    <div id="message"></div>
+    <button onclick="restartGame()">もう一度遊ぶ</button>
+
+    <script>
+        const gameBoard = document.getElementById('game-board');
+        const messageDisplay = document.getElementById('message');
+        
+        // ディズニーキャラクターの絵文字リスト (8種類)
+        const disneyEmojis = [
+            '', '', '', '', '', '', '', ''
+        ];
+        // 各絵文字を2つずつ（ペアにするため）
+        let cardValues = [...disneyEmojis, ...disneyEmojis]; // 8ペア16枚
+
+        let gameLocked = false; 
+        let flippedCards = []; 
+
+        /**
+         * 配列をシャッフルする関数（Fisher-Yatesアルゴリズム）
+         * @param {Array} array シャッフル対象の配列
+         */
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        /**
+         * ゲームボードを初期化し、カードを生成する
+         */
+        function initializeGame() {
+            gameBoard.innerHTML = ''; 
+            shuffleArray(cardValues); 
+            messageDisplay.textContent = ''; 
+            flippedCards = []; // めくられているカードをリセット
+            gameLocked = false; // ロックを解除
+
+            let cardIndex = 0;
+            cardValues.forEach(value => {
+                const cardElement = document.createElement('div');
+                cardElement.classList.add('card');
+                cardElement.dataset.value = value; 
+                cardElement.dataset.index = cardIndex++; 
+                cardElement.onclick = handleCardClick;
+
+                cardElement.innerHTML = `
+                    <div class="card-inner">
+                        <div class="card-back">?</div>
+                        <div class="card-face">${value}</div>
+                    </div>
+                `;
+
+                gameBoard.appendChild(cardElement);
+            });
+        }
+
+        /**
+         * カードクリック時の処理
+         * @param {Event} event クリックイベント
+         */
+        function handleCardClick(event) {
+            const card = event.currentTarget;
+            if (gameLocked || card.classList.contains('flipped') || card.classList.contains('matched')) {
+                return;
+            }
+
+            card.classList.add('flipped');
+            flippedCards.push(card);
+
+            if (flippedCards.length === 2) {
+                gameLocked = true; 
+                checkForMatch();
+            }
+        }
+
+        /**
+         * めくられた2枚のカードを比較する
+         */
+        function checkForMatch() {
+            const [card1, card2] = flippedCards;
+            
+            // 値（絵文字）が同じかどうかを判定
+            if (card1.dataset.value === card2.dataset.value) {
+                // --- マッチした場合 ---
+                setTimeout(() => {
+                    card1.classList.add('matched');
+                    card2.classList.add('matched');
+                    resetFlippedCards();
+                    checkGameOver();
+                }, 800);
+            } else {
+                // --- マッチしなかった場合 ---
+                setTimeout(() => {
+                    card1.classList.remove('flipped');
+                    card2.classList.remove('flipped');
+                    resetFlippedCards();
+                }, 1200); 
+            }
+        }
+
+        /**
+         * めくり中のカードの状態をリセットする
+         */
+        function resetFlippedCards() {
+            flippedCards = [];
+            gameLocked = false; 
+        }
+
+        /**
+         * ゲームオーバーの判定
+         */
+        function checkGameOver() {
+            const matchedCards = document.querySelectorAll('.matched');
+            if (matchedCards.length === cardValues.length) {
+                messageDisplay.textContent = ' ゲームクリア！おめでとう！ ';
+            }
+        }
+
+        /**
+         * ゲームをリスタートする
+         */
+        function restartGame() {
+            initializeGame();
+        }
+
+        // ページロード時にゲームを開始
+        initializeGame();
+    </script>
+</body>
+</html>
