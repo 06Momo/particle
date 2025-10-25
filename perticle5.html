@@ -1,0 +1,137 @@
+import streamlit as st
+import openai
+import os
+import re
+from datetime import date
+from typing import Optional, List
+
+# =======================================================================
+# 1. APIキーの設定とクライアント初期化
+# =======================================================================
+
+# Streamlit CloudのSecretsからAPIキーを安全に読み込む
+try:
+    client = openai.OpenAI(api_key=st.secrets["openai"]["api_key"])
+except KeyError:
+    st.error("エラー: OpenAI APIキーが設定されていません。")
+    st.info("Streamlit CloudのSecretsまたは環境変数に'openai.api_key'を設定してください。")
+    st.stop()
+except Exception as e:
+    st.error(f"APIクライアントの初期化に失敗しました: {e}")
+    st.stop()
+
+# =======================================================================
+# 2. 履歴（セッションステート）の初期化
+# =======================================================================
+
+# セッションステートに履歴リストがなければ初期化する
+if 'history' not in st.session_state:
+    st.session_state['history'] = []
+
+# =======================================================================
+# 3. メインロジック（AIへのプロンプト送信）
+# =======================================================================
+
+def generate_kaiun_action(today_date: date) -> Optional[str]:
+    """
+    今日の日付を元に、AIに開運アクションを生成させる関数
+    """
+    # 🌟 AIに送るプロンプトの設計 🌟
+    # 日付をインプットとすることで、毎日異なる結果を生成させる
+    system_prompt = f"""
+    あなたは、ユーザーの今日の日付 {today_date} の運気（ランダムな要素）を読み解き、
+    最適な「今日の開運アクション」を提案するポジティブなアドバイザーです。
+    具体的な行動を一つ提案し、その行動がなぜ運気を上げるかを解説してください。
+
+    【制約条件】
+    1. 出力は以下の2つの項目のみとします。
+    2. 「開運アクション」は具体的な行動（例: 昼食時に新しいルートを歩く）を一つだけ提案してください。
+    3. 「解説」はポジティブでユーモアを交えたトーンで、50文字以上100文字以下で記述してください。
+    4. 日本語で応答してください。
+
+    【出力フォーマット】
+    開運アクション：[具体的な行動]
+    解説：[ポジティブな解説文]
+    """
+    
+    # ユーザーからのメッセージは不要だが、APIコールのため空にせず日付情報を含める
+    user_message = f"今日の日付は {today_date} です。この日の運勢に合わせたアクションを生成してください。"
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # コストと速度のバランスが良いモデル
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=1.0,  # 創造性を最大化し、「ランダム性」を演出
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"AIからの応答取得中にエラーが発生しました: {e}")
+        return None
+
+# =======================================================================
+# 4. Streamlit UIの構築
+# =======================================================================
+
+st.set_page_config(page_title="今日の開運アクション診断 🍀", layout="centered")
+st.title("🍀 今日の開運アクション診断")
+st.markdown(f"🗓️ **今日の日付: {date.today()}**")
+st.markdown("ボタンを押して、あなただけの運気を上げる**ランダムな行動**を診断しましょう！")
+st.markdown("---")
+
+# === 診断ボタンとアクション ===
+if st.button("🔮 開運アクションを診断する！"):
+    with st.spinner("AIが今日の運勢を分析中..."):
+        result_text = generate_kaiun_action(date.today())
+    
+    if result_text:
+        # AIからの応答を解析し、整形して表示
+        action = "診断できませんでした"
+        comment = ""
+        
+        try:
+            action_match = re.search(r"開運アクション：(.+)", result_text)
+            comment_match = re.search(r"解説：(.+)", result_text)
+
+            if action_match:
+                action = action_match.group(1).strip()
+            if comment_match:
+                comment = comment_match.group(1).strip()
+            
+            # 履歴に追加
+            st.session_state['history'].append({
+                'date': date.today().strftime("%Y-%m-%d"),
+                'action': action,
+                'comment': comment
+            })
+
+            # 最新の結果を画面に表示
+            st.subheader("🌟 本日の開運アクション決定！ 🌟")
+            st.markdown(f"### ➡️ 開運アクション： **{action}**")
+            st.info(comment)
+
+        except Exception as e:
+            st.error(f"結果の解析中にエラーが発生しました。生データ: {result_text}")
+
+
+st.markdown("---")
+
+# === 履歴の表示 ===
+st.header("🕰️ 診断履歴")
+
+if st.session_state['history']:
+    # 履歴を逆順（最新が上）にして表示
+    display_history = st.session_state['history'][::-1]
+    
+    # データフレーム形式で表示する（見やすい）
+    history_data = [
+        {"日付": item['date'], "開運アクション": item['action'], "解説": item['comment']}
+        for item in display_history
+    ]
+    st.dataframe(history_data, hide_index=True, use_container_width=True)
+else:
+    st.info("まだ診断結果がありません。ボタンを押して最初の開運アクションを診断しましょう！")
+
+# =======================================================================
